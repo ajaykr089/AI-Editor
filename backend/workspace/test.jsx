@@ -1,0 +1,1 @@
+import "[mocked ai] You are an expert IDE completion engine. File language: javascript. Cursor line 1, column 9. Suggest 3 concise completions (up to ~20 tokens) that continue the code. Respond with b...";
