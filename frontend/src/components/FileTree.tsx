@@ -1,7 +1,8 @@
 import { FileNode } from 'shared';
 import { MdOutlineNoteAdd, MdOutlineCreateNewFolder, MdOutlineRefresh, MdOutlineCropSquare } from 'react-icons/md';
 import { FaFolder, FaFile } from 'react-icons/fa';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { memo } from 'react';
 
 type Props = {
   nodes: FileNode[];
@@ -28,7 +29,7 @@ type TreeNodeProps = {
   onToggleFolder: (path: string) => void;
 };
 
-const TreeNode = ({
+const TreeNode = memo(({
   node,
   level,
   onSelect,
@@ -41,23 +42,32 @@ const TreeNode = ({
   const isExpanded = expandedFolders.has(node.path);
   const hasChildren = node.children && node.children.length > 0;
 
+  // Memoize event handlers to prevent unnecessary re-renders
+  const handleSelect = useCallback(() => {
+    onSelect(node.path);
+  }, [node.path, onSelect]);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    onContextMenu(node, { x: e.clientX, y: e.clientY });
+  }, [node, onContextMenu]);
+
+  const handleToggleFolder = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    onToggleFolder(node.path);
+  }, [node.path, onToggleFolder]);
+
   return (
     <div className="tree-node" style={{ paddingLeft: `${level * 12}px` }}>
       <div
         className={`tree-row ${isSelected ? 'selected' : ''}`}
-        onClick={() => onSelect(node.path)}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          onContextMenu(node, { x: e.clientX, y: e.clientY });
-        }}
+        onClick={handleSelect}
+        onContextMenu={handleContextMenu}
       >
         {hasChildren && (
           <span 
             className="tree-expand-icon"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleFolder(node.path);
-            }}
+            onClick={handleToggleFolder}
             style={{ 
               marginRight: '6px',
               cursor: 'pointer',
@@ -89,29 +99,37 @@ const TreeNode = ({
       )}
     </div>
   );
-};
+});
 
-const FileTree = ({ nodes, onSelect, selectedPath, onRefresh, onContextMenu, onCreateFile, onCreateFolder, onCollapseAll }: Props) => {
+TreeNode.displayName = 'TreeNode';
+
+const FileTree = memo(({ nodes, onSelect, selectedPath, onRefresh, onContextMenu, onCreateFile, onCreateFolder, onCollapseAll }: Props) => {
   // State for managing expanded folders
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
 
-  // Initialize expanded state when nodes change
-  useEffect(() => {
-    // Expand folders that have children by default
+  // Memoize the expandFolders function to prevent unnecessary recalculations
+  const expandFolders = useCallback((fileNodes: FileNode[]) => {
     const newExpanded = new Set<string>();
-    const expandFolders = (fileNodes: FileNode[]) => {
-      fileNodes.forEach(node => {
+    const expand = (nodes: FileNode[]) => {
+      nodes.forEach(node => {
         if (node.children && node.children.length > 0) {
           newExpanded.add(node.path);
-          expandFolders(node.children);
+          expand(node.children);
         }
       });
     };
-    expandFolders(nodes);
-    setExpandedFolders(newExpanded);
-  }, [nodes]);
+    expand(fileNodes);
+    return newExpanded;
+  }, []);
 
-  const handleToggleFolder = (path: string) => {
+  // Initialize expanded state when nodes change
+  useEffect(() => {
+    const newExpanded = expandFolders(nodes);
+    setExpandedFolders(newExpanded);
+  }, [nodes, expandFolders]);
+
+  // Memoize event handlers to prevent unnecessary re-renders
+  const handleToggleFolder = useCallback((path: string) => {
     setExpandedFolders(prev => {
       const newSet = new Set(prev);
       if (newSet.has(path)) {
@@ -121,12 +139,25 @@ const FileTree = ({ nodes, onSelect, selectedPath, onRefresh, onContextMenu, onC
       }
       return newSet;
     });
-  };
+  }, []);
 
-  const handleCollapseAll = () => {
+  const handleCollapseAll = useCallback(() => {
     setExpandedFolders(new Set());
     if (onCollapseAll) onCollapseAll();
-  };
+  }, [onCollapseAll]);
+
+  // Memoize the file operation handlers
+  const handleCreateFile = useCallback(() => {
+    onCreateFile();
+  }, [onCreateFile]);
+
+  const handleCreateFolder = useCallback(() => {
+    onCreateFolder();
+  }, [onCreateFolder]);
+
+  const handleRefresh = useCallback(() => {
+    onRefresh();
+  }, [onRefresh]);
 
   return (
     <aside className="sidebar">
@@ -135,21 +166,21 @@ const FileTree = ({ nodes, onSelect, selectedPath, onRefresh, onContextMenu, onC
         <div className="file-op-buttons">
           <button 
             className="ghost" 
-            onClick={onCreateFile}
+            onClick={handleCreateFile}
             title="New File (Ctrl+N)"
           >
             <MdOutlineNoteAdd size={16} />
           </button>
           <button 
             className="ghost" 
-            onClick={onCreateFolder}
+            onClick={handleCreateFolder}
             title="New Folder"
           >
             <MdOutlineCreateNewFolder size={16} />
           </button>
           <button 
             className="ghost" 
-            onClick={onRefresh}
+            onClick={handleRefresh}
             title="Refresh Explorer (Ctrl+R)"
           >
             <MdOutlineRefresh size={16} />
@@ -179,6 +210,8 @@ const FileTree = ({ nodes, onSelect, selectedPath, onRefresh, onContextMenu, onC
       </div>
     </aside>
   );
-};
+});
+
+FileTree.displayName = 'FileTree';
 
 export default FileTree;

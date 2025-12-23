@@ -1,6 +1,6 @@
 import Editor, { OnMount, OnChange, OnValidate } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import TabsBar from './TabsBar';
 
 type Props = {
@@ -26,11 +26,11 @@ const EditorPane = ({ value, onChange, language, filePath, onRequestAutocomplete
   const [markers, setMarkers] = useState<any[]>([]);
   const [currentLine, setCurrentLine] = useState<number | null>(null);
 
-  useEffect(() => {
+  // Memoize autocomplete provider to prevent re-registration on every render
+  const autocompleteProvider = useCallback(() => {
     if (!monacoRef.current) return;
-    // re-register provider when language changes
-    autocompleteDisposable.current?.dispose?.();
-    autocompleteDisposable.current = monacoRef.current.languages.registerCompletionItemProvider(language, {
+    
+    return monacoRef.current.languages.registerCompletionItemProvider(language, {
       triggerCharacters: ['.', ' ', '(', "'", '"', '/', '\\', '<', '>', '{', '}', '[', ']', '=', ':', '-', '_', '+', '*', '#', '@', '!', '?', '%', '^', '&'],
       provideCompletionItems: async (model: any, position: any) => {
         const text = model.getValue();
@@ -47,6 +47,13 @@ const EditorPane = ({ value, onChange, language, filePath, onRequestAutocomplete
       },
     });
   }, [language, onRequestAutocomplete]);
+
+  useEffect(() => {
+    if (!monacoRef.current) return;
+    // re-register provider when language changes
+    autocompleteDisposable.current?.dispose?.();
+    autocompleteDisposable.current = autocompleteProvider();
+  }, [autocompleteProvider]);
 
   const handleMount: OnMount = (editor, monacoInstance) => {
     editorRef.current = editor;

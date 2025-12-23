@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, lazy } from 'react';
+import { useEffect, useMemo, useState, lazy, useCallback, Suspense } from 'react';
 import { AnalyzeIntent, ChatMessage, FileNode } from 'shared';
 import EditorPane from './components/EditorPane';
 import FileTree from './components/FileTree';
@@ -328,7 +328,7 @@ function App() {
 
   const editorLanguage = useMemo(() => language, [language]);
 
-  const commands = [
+  const commands = useMemo(() => [
     { id: 'save', label: 'File: Save', shortcut: 'Ctrl/Cmd+S', action: saveFile },
     { id: 'new-file', label: 'File: New File', shortcut: 'Ctrl/Cmd+N', action: () => handleCreate('file') },
     { id: 'new-folder', label: 'File: New Folder', action: () => handleCreate('folder') },
@@ -342,7 +342,40 @@ function App() {
     { id: 'theme', label: 'View: Toggle Theme', action: () => setTheme(theme === 'light' ? 'dark' : 'light') },
     { id: 'quick-open', label: 'Go: Quick Open', shortcut: 'Ctrl/Cmd+P', action: () => setQuickOpen(true) },
     { id: 'command', label: 'Go: Command Palette', shortcut: 'Ctrl/Cmd+Shift+P', action: () => setPaletteOpen(true) },
-  ];
+  ], [saveFile, handleCreate, handleExport, handleRename, handleDelete, handleAnalyze, setTheme, setQuickOpen, setPaletteOpen]);
+
+  const menus = useMemo(() => [
+    {
+      label: 'File',
+      items: [
+        { label: 'New File', action: () => handleCreate('file') },
+        { label: 'New Folder', action: () => handleCreate('folder') },
+        { label: 'Save', action: saveFile },
+        { label: 'Export ZIP', action: handleExport },
+      ],
+    },
+    {
+      label: 'Edit',
+      items: [
+        { label: 'Rename', action: handleRename },
+        { label: 'Delete', action: handleDelete },
+        { label: 'Quick Open', action: () => setQuickOpen(true) },
+      ],
+    },
+    {
+      label: 'AI',
+      items: [
+        { label: 'Find Errors', action: () => handleAnalyze('errors') },
+        { label: 'Fix Bugs', action: () => handleAnalyze('fix') },
+        { label: 'Explain', action: () => handleAnalyze('explain') },
+        { label: 'Refactor', action: () => handleAnalyze('refactor') },
+      ],
+    },
+    {
+      label: 'View',
+      items: [{ label: `Theme: ${theme}`, action: () => setTheme(theme === 'light' ? 'dark' : 'light') }],
+    },
+  ], [handleCreate, saveFile, handleExport, handleRename, handleDelete, setQuickOpen, handleAnalyze, theme, setTheme]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -621,38 +654,6 @@ function App() {
     return lines.map((l) => ({ message: l }));
   }, [aiResult]);
 
-  const menus = [
-    {
-      label: 'File',
-      items: [
-        { label: 'New File', action: () => handleCreate('file') },
-        { label: 'New Folder', action: () => handleCreate('folder') },
-        { label: 'Save', action: saveFile },
-        { label: 'Export ZIP', action: handleExport },
-      ],
-    },
-    {
-      label: 'Edit',
-      items: [
-        { label: 'Rename', action: handleRename },
-        { label: 'Delete', action: handleDelete },
-        { label: 'Quick Open', action: () => setQuickOpen(true) },
-      ],
-    },
-    {
-      label: 'AI',
-      items: [
-        { label: 'Find Errors', action: () => handleAnalyze('errors') },
-        { label: 'Fix Bugs', action: () => handleAnalyze('fix') },
-        { label: 'Explain', action: () => handleAnalyze('explain') },
-        { label: 'Refactor', action: () => handleAnalyze('refactor') },
-      ],
-    },
-    {
-      label: 'View',
-      items: [{ label: `Theme: ${theme}`, action: () => setTheme(theme === 'light' ? 'dark' : 'light') }],
-    },
-  ];
 
   const handleContextMenu = (node: FileNode, pos: { x: number; y: number }) => {
     setContextMenu({ path: node.path, type: node.type, x: pos.x, y: pos.y });
@@ -861,13 +862,26 @@ function App() {
         />
         {activeView === "ai" && (
           <div className="right-rail">
-            <ChatSidebar
-              messages={messages}
-              onSend={handleSendMessage}
-              outline={outline}
-              problems={parsedProblems}
-              onJumpToLine={(line) => setCursor({ line, column: 1 })}
-            />
+            <Suspense fallback={
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'center', 
+                alignItems: 'center', 
+                height: '100%', 
+                color: 'var(--muted)',
+                fontSize: '14px'
+              }}>
+                Loading AI Assistant...
+              </div>
+            }>
+              <ChatSidebar
+                messages={messages}
+                onSend={handleSendMessage}
+                outline={outline}
+                problems={parsedProblems}
+                onJumpToLine={(line) => setCursor({ line, column: 1 })}
+              />
+            </Suspense>
           </div>
         )}
       </div>

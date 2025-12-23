@@ -4,6 +4,7 @@ import {
   SiPhp, SiRuby, SiSwift, SiKotlin, SiSass 
 } from 'react-icons/si';
 import { FaFile, FaFileCode } from 'react-icons/fa';
+import { memo, useCallback } from 'react';
 
 type Tab = {
   path: string;
@@ -18,8 +19,8 @@ type Props = {
   onClose: (path: string) => void;
 };
 
-const TabsBar = ({ tabs, activePath, onSelect, onClose }: Props) => {
-  const getFileIcon = (path: string) => {
+const TabsBar = memo(({ tabs, activePath, onSelect, onClose }: Props) => {
+  const getFileIcon = useCallback((path: string) => {
     const ext = path.toLowerCase();
     if (ext.endsWith('.js') || ext.endsWith('.jsx')) return <SiJavascript />;
     if (ext.endsWith('.ts') || ext.endsWith('.tsx')) return <SiTypescript />;
@@ -39,7 +40,16 @@ const TabsBar = ({ tabs, activePath, onSelect, onClose }: Props) => {
     if (ext.endsWith('.swift')) return <SiSwift />;
     if (ext.endsWith('.kts') || ext.endsWith('.kt')) return <SiKotlin />;
     return <FaFileCode />;
-  };
+  }, []);
+
+  const handleSelect = useCallback((path: string) => {
+    onSelect(path);
+  }, [onSelect]);
+
+  const handleClose = useCallback((e: React.MouseEvent, path: string) => {
+    e.stopPropagation();
+    onClose(path);
+  }, [onClose]);
 
   return (
     <div className="tabs-bar">
@@ -49,7 +59,7 @@ const TabsBar = ({ tabs, activePath, onSelect, onClose }: Props) => {
           <div
             key={tab.path}
             className={`tab ${isActive ? 'active' : ''}`}
-            onClick={() => onSelect(tab.path)}
+            onClick={() => handleSelect(tab.path)}
             title={tab.path}
             style={{ 
               borderLeft: tab.dirty ? '3px solid var(--accent)' : '3px solid transparent',
@@ -72,10 +82,7 @@ const TabsBar = ({ tabs, activePath, onSelect, onClose }: Props) => {
             </span>
             <button
               className="tab-close"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose(tab.path);
-              }}
+              onClick={(e) => handleClose(e, tab.path)}
               title="Close Tab (Ctrl+W)"
             >
               ×
@@ -90,6 +97,8 @@ const TabsBar = ({ tabs, activePath, onSelect, onClose }: Props) => {
       )}
     </div>
   );
-};
+});
+
+TabsBar.displayName = 'TabsBar';
 
 export default TabsBar;
