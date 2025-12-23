@@ -1,5 +1,7 @@
-import Editor, { OnMount } from '@monaco-editor/react';
-import { useEffect, useRef } from 'react';
+import Editor, { OnMount, OnChange, OnValidate } from '@monaco-editor/react';
+import * as monaco from 'monaco-editor';
+import { useEffect, useRef, useState } from 'react';
+import TabsBar from './TabsBar';
 
 type Props = {
   value: string;
@@ -11,26 +13,32 @@ type Props = {
     suggestions: string[];
   }>;
   onCursorChange: (pos: { line: number; column: number }) => void;
+  tabs:{ path: string; label: string; dirty?: boolean }[];
+  activePath:string | null;
+  onSelect:(path: string)=>void;
+  onClose:(path: string)=>void;
 };
 
-const EditorPane = ({ value, onChange, language, filePath, onRequestAutocomplete, theme, onCursorChange }: Props) => {
+const EditorPane = ({ value, onChange, language, filePath, onRequestAutocomplete, theme, onCursorChange, tabs, activePath, onClose, onSelect }: Props) => {
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
   const autocompleteDisposable = useRef<any>(null);
+  const [markers, setMarkers] = useState<any[]>([]);
+  const [currentLine, setCurrentLine] = useState<number | null>(null);
 
   useEffect(() => {
     if (!monacoRef.current) return;
     // re-register provider when language changes
     autocompleteDisposable.current?.dispose?.();
     autocompleteDisposable.current = monacoRef.current.languages.registerCompletionItemProvider(language, {
-      triggerCharacters: ['.', ' ', '(', "'", '"'],
+      triggerCharacters: ['.', ' ', '(', "'", '"', '/', '\\', '<', '>', '{', '}', '[', ']', '=', ':', '-', '_', '+', '*', '#', '@', '!', '?', '%', '^', '&'],
       provideCompletionItems: async (model: any, position: any) => {
         const text = model.getValue();
         const { lineNumber, column } = position;
         const response = await onRequestAutocomplete({ content: text, line: lineNumber, column });
         const suggestions = response.suggestions.map((label, idx) => ({
           label,
-          kind: monacoRef.current.languages.CompletionItemKind.Snippet,
+          kind: monaco.languages.CompletionItemKind.Snippet,
           insertText: label,
           range: undefined,
           sortText: `0${idx}`,
@@ -40,32 +48,149 @@ const EditorPane = ({ value, onChange, language, filePath, onRequestAutocomplete
     });
   }, [language, onRequestAutocomplete]);
 
-  const handleMount: OnMount = (editor, monaco) => {
+  const handleMount: OnMount = (editor, monacoInstance) => {
     editorRef.current = editor;
-    monacoRef.current = monaco;
+    monacoRef.current = monacoInstance;
+
+    // Enhanced editor options
+    editor.updateOptions({
+      minimap: { enabled: true },
+      fontSize: 14,
+      scrollBeyondLastLine: false,
+      wordWrap: "on",
+      lineNumbers: "on",
+      roundedSelection: true,
+      automaticLayout: true,
+      tabSize: 2,
+      insertSpaces: true,
+      formatOnType: true,
+      formatOnPaste: true,
+      folding: true,
+      foldingHighlight: true,
+      guides: {
+        indentation: true,
+        bracketPairs: true
+      },
+      bracketPairColorization: {
+        enabled: true
+      },
+      parameterHints: {
+        enabled: true
+      },
+      quickSuggestions: {
+        other: true,
+        comments: false,
+        strings: false
+      },
+      suggest: {
+        showKeywords: true,
+        showFunctions: true,
+        showClasses: true,
+        showModules: true,
+        showVariables: true,
+        showWords: true,
+        showColors: true,
+        showFiles: true,
+        showReferences: true,
+        showFolders: true,
+        showIssues: true
+      }
+    });
+
     editor.onDidChangeCursorPosition((e) => {
       onCursorChange({ line: e.position.lineNumber, column: e.position.column });
+      setCurrentLine(e.position.lineNumber);
     });
+
+    // Add line highlighting
+    const decorationId = editor.createDecorationsCollection([{
+      range: new monaco.Range(1, 1, 1, 1),
+      options: {
+        className: 'current-line-highlight',
+        isWholeLine: true,
+        inlineClassName: 'current-line-gutter'
+      }
+    }]);
+
+    // Set up marker listener for error highlighting
+    monaco.editor.onDidChangeMarkers((uris) => {
+      const model = editor.getModel();
+      if (model) {
+        const newMarkers = monaco.editor.getModelMarkers({ resource: model.uri });
+        setMarkers(newMarkers);
+      }
+    });
+  };
+
+  const handleChange: OnChange = (value) => {
+    onChange(value ?? "");
+  };
+
+  const handleValidate: OnValidate = (markers) => {
+    // Handle validation markers
+    setMarkers(markers);
   };
 
   return (
     <div className="editor-pane">
       <div className="editor-header">
-        <span>{filePath}</span>
-        <span className="chip">{language}</span>
+        <TabsBar
+          tabs={tabs}
+          activePath={activePath}
+          onSelect={onSelect}
+          onClose={onClose}
+        />
       </div>
       <Editor
         height="calc(100vh - 160px)"
-        theme={theme === 'dark' ? 'vs-dark' : 'vs-light'}
+        theme={theme === "dark" ? "vs-dark" : "vs-light"}
         language={language}
         value={value}
-        onChange={(val) => onChange(val ?? '')}
+        onChange={handleChange}
         onMount={handleMount}
+        onValidate={handleValidate}
         options={{
-          minimap: { enabled: false },
+          minimap: { enabled: true },
           fontSize: 14,
           scrollBeyondLastLine: false,
-          wordWrap: 'on',
+          wordWrap: "on",
+          lineNumbers: "on",
+          roundedSelection: true,
+          automaticLayout: true,
+          tabSize: 2,
+          insertSpaces: true,
+          formatOnType: true,
+          formatOnPaste: true,
+          folding: true,
+          foldingHighlight: true,
+          guides: {
+            indentation: true,
+            bracketPairs: true
+          },
+          bracketPairColorization: {
+            enabled: true
+          },
+          parameterHints: {
+            enabled: true
+          },
+          quickSuggestions: {
+            other: true,
+            comments: false,
+            strings: false
+          },
+          suggest: {
+            showKeywords: true,
+            showFunctions: true,
+            showClasses: true,
+            showModules: true,
+            showVariables: true,
+            showWords: true,
+            showColors: true,
+            showFiles: true,
+            showReferences: true,
+            showFolders: true,
+            showIssues: true
+          }
         }}
       />
     </div>
@@ -73,4 +198,3 @@ const EditorPane = ({ value, onChange, language, filePath, onRequestAutocomplete
 };
 
 export default EditorPane;
-

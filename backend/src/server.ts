@@ -6,6 +6,7 @@ import { existsSync, createReadStream } from 'fs';
 import archiver from 'archiver';
 import dotenv from 'dotenv';
 import readline from 'node:readline';
+import { ESLint } from 'eslint';
 
 dotenv.config();
 
@@ -23,6 +24,14 @@ app.use(express.json({ limit: '5mb' }));
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
 const WORKSPACE_ROOT = path.join(process.cwd(), 'workspace');
 
+// Declare global workspace root variable
+declare global {
+  var WORKSPACE_ROOT: string;
+}
+
+// Initialize global workspace root
+global.WORKSPACE_ROOT = WORKSPACE_ROOT;
+
 const ensureWorkspace = async () => {
   if (!existsSync(WORKSPACE_ROOT)) {
     await fs.mkdir(WORKSPACE_ROOT, { recursive: true });
@@ -30,19 +39,23 @@ const ensureWorkspace = async () => {
 };
 
 const resolveSafe = (requestedPath: string) => {
-  const normalized = path.normalize(path.join(WORKSPACE_ROOT, requestedPath));
-  if (!normalized.startsWith(WORKSPACE_ROOT)) {
+  // Use the global workspace root if it exists, otherwise fall back to the constant
+  const currentWorkspaceRoot = global.WORKSPACE_ROOT || WORKSPACE_ROOT;
+  const normalized = path.normalize(path.join(currentWorkspaceRoot, requestedPath));
+  if (!normalized.startsWith(currentWorkspaceRoot)) {
     throw new Error('Invalid path');
   }
   return normalized;
 };
 
 const readTree = async (dir: string): Promise<FileNode[]> => {
+  // Use the global workspace root if it exists, otherwise fall back to the constant
+  const currentWorkspaceRoot = global.WORKSPACE_ROOT || WORKSPACE_ROOT;
   const entries = await fs.readdir(dir, { withFileTypes: true });
   const nodes: FileNode[] = [];
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
-    const relative = path.relative(WORKSPACE_ROOT, fullPath);
+    const relative = path.relative(currentWorkspaceRoot, fullPath);
     if (entry.isDirectory()) {
       nodes.push({
         name: entry.name,
@@ -108,6 +121,55 @@ const callLLM = async (prompt: string): Promise<string> => {
     console.error('LLM error', err);
     return 'AI call failed. Please check server logs or your API key.';
   }
+};
+
+const lintCode = async (code: string, language: string, filePath: string): Promise<string[]> => {
+  const errors: string[] = [];
+  
+  // JavaScript/TypeScript linting with ESLint
+  if (language === 'javascript' || language === 'typescript' || language === 'javascriptreact' || language === 'typescriptreact') {
+    try {
+      const eslint = new ESLint({
+        overrideConfigFile: true,
+        overrideConfig: [
+          {
+            files: ['**/*'],
+            languageOptions: {
+              ecmaVersion: 2022,
+              sourceType: 'module',
+              parserOptions: {
+                ecmaFeatures: {
+                  jsx: language.includes('react')
+                }
+              }
+            },
+            rules: {
+              'no-unused-vars': 'warn',
+              'no-undef': 'error',
+              'no-console': 'warn',
+              'semi': ['error', 'always'],
+              'quotes': ['error', 'single', { avoidEscape: true }],
+              'no-trailing-spaces': 'error',
+              'eol-last': 'error'
+            }
+          }
+        ]
+      });
+
+      const results = await eslint.lintText(code, { filePath });
+      
+      if (results[0]?.messages?.length > 0) {
+        results[0].messages.forEach(msg => {
+          errors.push(`Line ${msg.line}: ${msg.message} (${msg.ruleId || 'eslint'})`);
+        });
+      }
+    } catch (err) {
+      console.error('ESLint error:', err);
+      errors.push('Error running ESLint - please check your code syntax');
+    }
+  }
+  
+  return errors;
 };
 
 app.get('/api/health', (_req, res) => {
@@ -210,6 +272,33 @@ app.get('/api/export', async (_req, res) => {
   }
 });
 
+// Endpoint to change workspace directory
+app.post('/api/change-workspace', async (req, res) => {
+  try {
+    const { workspacePath } = req.body as { workspacePath: string };
+    if (!workspacePath) throw new Error('workspacePath required');
+    
+    // Validate that the path exists and is a directory
+    if (!existsSync(workspacePath)) {
+      throw new Error('Workspace path does not exist');
+    }
+    
+    const stat = await fs.stat(workspacePath);
+    if (!stat.isDirectory()) {
+      throw new Error('Workspace path is not a directory');
+    }
+    
+    // Update the global workspace root
+    global.WORKSPACE_ROOT = workspacePath;
+    
+    // Refresh the tree
+    const tree = await readTree(workspacePath);
+    res.json({ ok: true, tree, workspacePath });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/chat', async (req, res) => {
   try {
     const { messages } = req.body as { messages: { role: string; content: string }[] };
@@ -250,7 +339,18 @@ app.post('/api/analyze', async (req, res) => {
       language: string;
       intent: 'errors' | 'explain' | 'refactor' | 'fix';
     };
-    const prompt = `Language: ${language}. Intent: ${intent}. Provide a short, actionable response. If intent is fix or refactor, include a patched version of the code after the analysis.\n\nCode:\n${code}`;
+    
+    let prompt = `Language: ${language}. Intent: ${intent}. Provide a short, actionable response. If intent is fix or refactor, include a patched version of the code after the analysis.\n\nCode:\n${code}`;
+    
+    // For error detection, first run linting and include results
+    if (intent === 'errors') {
+      const lintErrors = await lintCode(code, language, 'temp-file');
+      if (lintErrors.length > 0) {
+        const lintResults = lintErrors.join('\n');
+        prompt = `Language: ${language}. Intent: ${intent}. Provide a short, actionable response. First, list the linting errors found. Then provide analysis. If there are no errors, say "No errors found".\n\nLinting Results:\n${lintResults}\n\nCode:\n${code}`;
+      }
+    }
+    
     const reply = await callLLM(prompt);
     res.json({ reply });
   } catch (err: any) {
@@ -300,4 +400,3 @@ ensureWorkspace().then(() => {
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled rejection', reason);
 });
-

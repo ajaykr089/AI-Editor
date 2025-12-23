@@ -22,5 +22,22 @@ export default defineConfig({
   optimizeDeps: {
     include: ['monaco-editor/esm/vs/editor/editor.api'],
   },
+  build: {
+    outDir: 'dist',
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+          monaco: ['monaco-editor'],
+          ui: ['react-icons'],
+          api: ['./src/api/client'],
+        }
+      }
+    },
+    chunkSizeWarningLimit: 1000,
+  },
+  esbuild: {
+    target: 'es2020',
+  },
 });
-

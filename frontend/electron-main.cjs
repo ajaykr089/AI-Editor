@@ -9,6 +9,13 @@ const createWindow = () => {
     minHeight: 600,
     title: 'AI Editor',
     backgroundColor: '#0f172a',
+    frame: false, // Remove default title bar
+    titleBarStyle: 'hidden', // Hide title bar on macOS
+    titleBarOverlay: {
+      color: '#0f172a',
+      symbolColor: '#e7ecf5',
+      height: 32
+    },
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -69,6 +76,14 @@ const createAppMenu = (win) => {
           click: () => {
             const w = targetWindow();
             if (w) w.webContents.send('menu-action', 'new-folder');
+          },
+        },
+        {
+          label: 'Open Folder',
+          accelerator: 'CmdOrCtrl+O',
+          click: () => {
+            const w = targetWindow();
+            if (w) w.webContents.send('menu-action', 'open-folder');
           },
         },
         { type: 'separator' },
@@ -193,6 +208,103 @@ app.whenReady().then(() => {
   const win = createWindow();
   createAppMenu(win);
 
+  // Handle IPC messages from TitleBar
+  const { ipcMain } = require('electron');
+  
+  ipcMain.on('minimize-window', () => {
+    if (win) win.minimize();
+  });
+
+  ipcMain.on('maximize-window', () => {
+    if (win) {
+      if (win.isMaximized()) {
+        win.unmaximize();
+      } else {
+        win.maximize();
+      }
+    }
+  });
+
+  ipcMain.on('close-window', () => {
+    if (win) win.close();
+  });
+
+  // VSCode-like file operations
+  ipcMain.on('reveal-in-finder', (event, path) => {
+    const { shell } = require('electron');
+    try {
+      shell.showItemInFolder(path);
+      console.log('Revealed in finder:', path);
+    } catch (error) {
+      console.error('Failed to reveal in finder:', error);
+    }
+  });
+
+  ipcMain.on('copy-path', (event, path) => {
+    const { clipboard } = require('electron');
+    try {
+      clipboard.writeText(path);
+      console.log('Copied path to clipboard:', path);
+    } catch (error) {
+      console.error('Failed to copy path:', error);
+    }
+  });
+
+  ipcMain.on('copy-relative-path', (event, path) => {
+    const { clipboard } = require('electron');
+    try {
+      // For now, just copy the full path (could be enhanced to calculate relative path)
+      clipboard.writeText(path);
+      console.log('Copied relative path to clipboard:', path);
+    } catch (error) {
+      console.error('Failed to copy relative path:', error);
+    }
+  });
+
+  ipcMain.on('open-folder', (event, path) => {
+    const { shell } = require('electron');
+    try {
+      // Get the directory path (remove file name if it's a file)
+      const pathToOpen = path.replace(/\/[^\/]+$/, '') || path;
+      shell.openPath(pathToOpen);
+      console.log('Opened folder:', pathToOpen);
+    } catch (error) {
+      console.error('Failed to open folder:', error);
+    }
+  });
+
+  // Native folder picker dialog
+  ipcMain.handle('dialog:showOpenDialog', async (event, options) => {
+    const { dialog } = require('electron');
+    try {
+      const result = await dialog.showOpenDialog(options);
+      return result;
+    } catch (error) {
+      console.error('Failed to open folder picker:', error);
+      throw error;
+    }
+  });
+
+  // Legacy folder picker for backward compatibility
+  ipcMain.on('open-folder-picker', async (event) => {
+    const { dialog } = require('electron');
+    try {
+      const result = await dialog.showOpenDialog({
+        properties: ['openDirectory', 'createDirectory']
+      });
+      
+      if (!result.canceled && result.filePaths.length > 0) {
+        const selectedPath = result.filePaths[0];
+        console.log('Selected folder:', selectedPath);
+        
+        // Send the selected folder path back to the renderer
+        event.sender.send('folder-selected', selectedPath);
+      }
+    } catch (error) {
+      console.error('Failed to open folder picker:', error);
+    }
+  });
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -203,4 +315,3 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
-

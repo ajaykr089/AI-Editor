@@ -9,9 +9,11 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
+    "@types/eslint": "^9.6.1",
     "archiver": "^7.0.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "eslint": "^9.39.2",
     "express": "^4.19.2"
   },
   "devDependencies": {
