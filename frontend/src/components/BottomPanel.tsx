@@ -2,14 +2,36 @@ import { useState } from 'react';
 
 type PanelType = 'problems' | 'output' | 'debug' | 'terminal';
 
+type TerminalTab = {
+  id: string;
+  name: string;
+  output: string[];
+  currentCommand: string;
+};
+
 type Props = {
   problems: { message: string }[];
   output: string[];
   debugMessages: string[];
-  onTerminalCommand?: (cmd: string) => void;
+  onTerminalCommand: (cmd: string) => void;
+  terminalTabs?: TerminalTab[];
+  activeTerminalTab?: string;
+  onTerminalTabSwitch?: (tabId: string) => void;
+  onNewTerminalTab?: () => void;
+  onCloseTerminalTab?: (tabId: string) => void;
 };
 
-const BottomPanel = ({ problems, output, debugMessages, onTerminalCommand }: Props) => {
+const BottomPanel = ({
+  problems,
+  output,
+  debugMessages,
+  onTerminalCommand,
+  terminalTabs = [],
+  activeTerminalTab = '',
+  onTerminalTabSwitch,
+  onNewTerminalTab,
+  onCloseTerminalTab
+}: Props) => {
   const [activePanel, setActivePanel] = useState<PanelType>('problems');
   const [isVisible, setIsVisible] = useState(false);
   const [terminalInput, setTerminalInput] = useState('');
@@ -99,10 +121,85 @@ const BottomPanel = ({ problems, output, debugMessages, onTerminalCommand }: Pro
           )}
           {activePanel === 'terminal' && (
             <div className="panel-content terminal-content">
-              <div className="terminal-output">
-                <div className="terminal-line">AI Editor Terminal</div>
-                <div className="terminal-line">Type commands below (basic commands supported)</div>
+              {/* Terminal Tabs */}
+              <div className="terminal-tabs-bar" style={{
+                display: 'flex',
+                alignItems: 'center',
+                borderBottom: '1px solid var(--border)',
+                padding: '0 8px',
+                gap: '4px'
+              }}>
+                {terminalTabs.map((tab) => (
+                  <div
+                    key={tab.id}
+                    className={`terminal-tab ${activeTerminalTab === tab.id ? 'active' : ''}`}
+                    onClick={() => onTerminalTabSwitch?.(tab.id)}
+                    style={{
+                      padding: '4px 8px',
+                      cursor: 'pointer',
+                      borderRadius: '4px 4px 0 0',
+                      background: activeTerminalTab === tab.id ? 'var(--panel)' : 'transparent',
+                      border: activeTerminalTab === tab.id ? '1px solid var(--border)' : 'none',
+                      borderBottom: activeTerminalTab === tab.id ? 'none' : '1px solid var(--border)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      fontSize: '12px'
+                    }}
+                  >
+                    <span>{tab.name}</span>
+                    {terminalTabs.length > 1 && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onCloseTerminalTab?.(tab.id);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--muted)',
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          padding: '0 2px',
+                          marginLeft: '4px'
+                        }}
+                        title="Close Terminal"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  onClick={onNewTerminalTab}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--accent)',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    padding: '4px 8px',
+                    marginLeft: '4px'
+                  }}
+                  title="New Terminal"
+                >
+                  +
+                </button>
               </div>
+
+              {/* Terminal Output */}
+              <div className="terminal-output">
+                {terminalTabs.find(tab => tab.id === activeTerminalTab)?.output.map((line, idx) => (
+                  <div key={idx} className="terminal-line">
+                    {line}
+                  </div>
+                ))}
+                {!terminalTabs.find(tab => tab.id === activeTerminalTab)?.output.length && (
+                  <div className="terminal-line">AI Editor Terminal</div>
+                )}
+              </div>
+
+              {/* Terminal Input */}
               <form onSubmit={handleTerminalSubmit} className="terminal-input-form">
                 <span className="terminal-prompt">$</span>
                 <input
@@ -122,4 +219,3 @@ const BottomPanel = ({ problems, output, debugMessages, onTerminalCommand }: Pro
 };
 
 export default BottomPanel;
-

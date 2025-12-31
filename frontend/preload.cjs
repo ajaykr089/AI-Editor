@@ -28,3 +28,10 @@ contextBridge.exposeInMainWorld('electron', {
 contextBridge.exposeInMainWorld('dialog', {
   showOpenDialog: (options) => ipcRenderer.invoke('dialog:showOpenDialog', options)
 });
+
+// Expose terminal functionality
+contextBridge.exposeInMainWorld('terminal', {
+  executeCommand: (command) => ipcRenderer.send('terminal-command', command),
+  onOutput: (callback) => ipcRenderer.on('terminal-output', callback),
+  removeOutputListener: (callback) => ipcRenderer.removeListener('terminal-output', callback)
+});

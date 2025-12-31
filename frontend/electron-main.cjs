@@ -1,6 +1,9 @@
 const { app, BrowserWindow, Menu } = require('electron');
 const path = require('path');
 
+// Define workspace root path
+const WORKSPACE_ROOT = path.join(process.cwd(), 'backend', 'workspace');
+
 const createWindow = () => {
   const win = new BrowserWindow({
     width: 1280,
@@ -302,6 +305,131 @@ app.whenReady().then(() => {
       }
     } catch (error) {
       console.error('Failed to open folder picker:', error);
+    }
+  });
+
+  // Terminal command execution
+  ipcMain.on('terminal-command', async (event, data) => {
+    const { spawn } = require('child_process');
+    const path = require('path');
+    const fs = require('fs');
+
+    try {
+      // Handle both string and object formats
+      const command = typeof data === 'string' ? data : data.command;
+      const terminalId = typeof data === 'object' ? data.terminalId : null;
+
+      // Get the current workspace directory
+      const workspaceDir = global.WORKSPACE_ROOT || WORKSPACE_ROOT;
+
+      // Parse command and arguments
+      const [cmd, ...args] = command.trim().split(/\s+/);
+
+      console.log('Executing command:', cmd, args, 'in directory:', workspaceDir);
+
+      // Determine the appropriate shell for the system
+      let shell;
+      if (process.platform === 'win32') {
+        shell = 'cmd.exe';
+      } else {
+        // Try to find a suitable shell
+        const possibleShells = ['/bin/bash', '/usr/bin/bash', '/bin/sh', '/usr/bin/sh'];
+        for (const shellPath of possibleShells) {
+          try {
+            if (fs.existsSync(shellPath)) {
+              shell = shellPath;
+              break;
+            }
+          } catch (e) {
+            // Continue checking other shells
+          }
+        }
+        // Fallback to system default if no shell found
+        if (!shell) {
+          shell = true; // Use default system shell
+        }
+      }
+
+      console.log('Using shell:', shell);
+
+      // Try to execute without shell first for simple commands
+      let child;
+      try {
+        if (shell === true) {
+          // Use system default shell
+          child = spawn(cmd, args, {
+            cwd: workspaceDir,
+            stdio: ['pipe', 'pipe', 'pipe']
+          });
+        } else {
+          // Try with detected shell
+          child = spawn(cmd, args, {
+            cwd: workspaceDir,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            shell: shell
+          });
+        }
+      } catch (spawnError) {
+        console.log('Direct spawn failed, trying with shell:', spawnError.message);
+        // Fallback: try with basic shell options
+        const fallbackShell = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
+        child = spawn(cmd, args, {
+          cwd: workspaceDir,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          shell: fallbackShell
+        });
+      }
+
+      let output = '';
+      let errorOutput = '';
+
+      child.stdout.on('data', (data) => {
+        const chunk = data.toString();
+        output += chunk;
+        console.log('STDOUT:', chunk);
+      });
+
+      child.stderr.on('data', (data) => {
+        const chunk = data.toString();
+        errorOutput += chunk;
+        console.log('STDERR:', chunk);
+      });
+
+      child.on('close', (code) => {
+        console.log('Command exited with code:', code);
+        const result = output.trim() || errorOutput.trim() || `Command completed with code ${code}`;
+
+        const response = {
+          command,
+          output: result,
+          success: code === 0,
+          terminalId: terminalId
+        };
+
+        console.log('Sending response:', response);
+        event.sender.send('terminal-output', response);
+      });
+
+      child.on('error', (error) => {
+        console.error('Spawn error:', error);
+        const response = {
+          command,
+          output: `Error executing command: ${error.message}`,
+          success: false,
+          terminalId: terminalId
+        };
+        event.sender.send('terminal-output', response);
+      });
+
+    } catch (error) {
+      console.error('Command execution error:', error);
+      const response = {
+        command: typeof data === 'string' ? data : data.command,
+        output: `Failed to execute command: ${error.message}`,
+        success: false,
+        terminalId: typeof data === 'object' ? data.terminalId : null
+      };
+      event.sender.send('terminal-output', response);
     }
   });
 

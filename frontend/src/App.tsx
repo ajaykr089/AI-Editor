@@ -93,6 +93,10 @@ function App() {
   } | null>(null);
   const [tabs, setTabs] = useState<{ path: string; label: string; dirty?: boolean }[]>([]);
   const [originalContents, setOriginalContents] = useState<Record<string, string>>({});
+
+  // Navigation history for file navigation
+  const [navigationHistory, setNavigationHistory] = useState<string[]>([]);
+  const [navigationIndex, setNavigationIndex] = useState(-1);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
   const [quickOpen, setQuickOpen] = useState(false);
@@ -111,6 +115,9 @@ function App() {
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [modalTargetPath, setModalTargetPath] = useState<string | null>(null);
+ const [terminalTabs, setTerminalTabs] = useState<{ id: string; name: string; output: string[]; currentCommand: string }[]>([
+    { id: 'terminal-1', name: 'Terminal 1', output:["Welcome to the terminal. Type 'help' for a list of commands."], currentCommand: '' }]);
+  const [activeTerminalTab, setActiveTerminalTab] = useState<string>('terminal-1');
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -144,6 +151,8 @@ function App() {
 
   const loadEntry = async (path: string) => {
     const node = findNode(tree, path);
+    const previousPath = selectedPath;
+
     setSelectedPath(path);
     if (node?.type === 'folder') {
       setContent('');
@@ -154,18 +163,35 @@ function App() {
     const fileContent = data.content ?? '';
     setContent(fileContent);
     const label = path.split('/').pop() ?? path;
-    
+
     // Store original content for dirty state comparison
     setOriginalContents(prev => ({
       ...prev,
       [path]: fileContent
     }));
-    
+
     setTabs((prev) => {
       const exists = prev.find((t) => t.path === path);
       if (exists) return prev;
       return [...prev, { path, label, dirty: false }];
     });
+
+    // Update navigation history
+    if (previousPath && previousPath !== path) {
+      // If we're navigating to a different file, add to history
+      setNavigationHistory(prev => {
+        // Remove any entries after current index (when navigating back then opening new file)
+        const newHistory = prev.slice(0, navigationIndex + 1);
+        // Add new entry if it's different from the last one
+        if (newHistory[newHistory.length - 1] !== previousPath) {
+          newHistory.push(previousPath);
+        }
+        // Add current file to history
+        newHistory.push(path);
+        return newHistory;
+      });
+      setNavigationIndex(prev => prev + 1);
+    }
   };
 
   const saveFile = async () => {
@@ -303,16 +329,105 @@ function App() {
     }
   };
 
-  const handleTerminalCommand = (cmd: string) => {
-    setOutput((prev) => [...prev, `$ ${cmd}`]);
-    if (cmd === 'clear') {
-      setOutput([]);
-    } else if (cmd.startsWith('echo ')) {
-      setOutput((prev) => [...prev, cmd.substring(5)]);
-    } else {
-      setOutput((prev) => [...prev, `Command not found: ${cmd}. Try 'clear' or 'echo <text>'`]);
+  // Terminal tab management functions
+  const createNewTerminalTab = () => {
+    const newId = `terminal-${Date.now()}`;
+    const terminalNumber = terminalTabs.length + 1;
+    setTerminalTabs(prev => [...prev, {
+      id: newId,
+      name: `Terminal ${terminalNumber}`,
+      output: [],
+      currentCommand: ''
+    }]);
+    setActiveTerminalTab(newId);
+  };
+
+  const closeTerminalTab = (tabId: string) => {
+    if (terminalTabs.length <= 1) return; // Keep at least one terminal
+
+    setTerminalTabs(prev => prev.filter(tab => tab.id !== tabId));
+
+    // Switch to another tab if the active one is being closed
+    if (activeTerminalTab === tabId) {
+      const remainingTabs = terminalTabs.filter(tab => tab.id !== tabId);
+      setActiveTerminalTab(remainingTabs[0]?.id || '');
     }
   };
+
+  const updateTerminalOutput = (tabId: string, newOutput: string[]) => {
+    setTerminalTabs(prev => prev.map(tab =>
+      tab.id === tabId ? { ...tab, output: newOutput } : tab
+    ));
+  };
+
+  const handleTerminalCommand = useCallback((cmd: string) => {
+    const activeTab = terminalTabs.find(tab => tab.id === activeTerminalTab);
+    if (!activeTab) return;
+
+    const newOutput = [...activeTab.output, `$ ${cmd}`];
+
+    // Built-in commands
+    if (cmd === 'clear') {
+      updateTerminalOutput(activeTerminalTab, []);
+      return;
+    } else if (cmd.startsWith('echo ')) {
+      updateTerminalOutput(activeTerminalTab, [...newOutput, cmd.substring(5)]);
+      return;
+    } else if (cmd === 'help') {
+      const helpOutput = [
+        'Available commands:',
+        '  clear           - Clear terminal',
+        '  echo <text>     - Print text',
+        '  help            - Show this help',
+        '  pwd             - Show current directory',
+        '  ls              - List files (if supported)',
+        '  node -v         - Check Node.js version',
+        '  npm -v          - Check npm version',
+        '  git --version   - Check Git version',
+        '  cd <path>       - Change directory',
+        '  mkdir <name>    - Create directory',
+        '  touch <file>    - Create file'
+      ];
+      updateTerminalOutput(activeTerminalTab, [...newOutput, ...helpOutput]);
+      return;
+    } else if (cmd === 'pwd') {
+      // Try to get current working directory
+      if (window && (window as any).electron && (window as any).electron.ipcRenderer) {
+        (window as any).electron.ipcRenderer.send('terminal-command', { command: cmd, terminalId: activeTerminalTab });
+      } else {
+        updateTerminalOutput(activeTerminalTab, [...newOutput, 'Command not available in web mode']);
+      }
+      return;
+    } else if (cmd === 'ls' || cmd === 'dir') {
+      // Try to list files
+      if (window && (window as any).electron && (window as any).electron.ipcRenderer) {
+        (window as any).electron.ipcRenderer.send('terminal-command', { command: cmd, terminalId: activeTerminalTab });
+      } else {
+        updateTerminalOutput(activeTerminalTab, [...newOutput, 'Command not available in web mode']);
+      }
+      return;
+    }
+
+    // Native CLI commands (Node.js, npm, git, etc.)
+    if (window && (window as any).electron && (window as any).electron.ipcRenderer) {
+      // Send command to Electron main process for execution
+      (window as any).electron.ipcRenderer.send('terminal-command', { command: cmd, terminalId: activeTerminalTab });
+    } else {
+      // Web mode - limited functionality
+      const cmdLower = cmd.toLowerCase();
+      let response = '';
+      if (cmdLower.includes('node') && cmdLower.includes('-v')) {
+        response = 'Node.js version check not available in web mode';
+      } else if (cmdLower.includes('npm') && cmdLower.includes('-v')) {
+        response = 'npm version check not available in web mode';
+      } else if (cmdLower.includes('git') && cmdLower.includes('--version')) {
+        response = 'Git version check not available in web mode';
+      } else {
+        response = `Command not found: ${cmd}. Try 'help' for available commands`;
+      }
+      updateTerminalOutput(activeTerminalTab, [...newOutput, response]);
+    }
+  }, [terminalTabs, activeTerminalTab, updateTerminalOutput]);
 
   const handleExport = async () => {
     setStatus('Preparing ZIP...');
@@ -463,6 +578,17 @@ function App() {
         e.preventDefault();
         setTheme(theme === 'light' ? 'dark' : 'light');
       }
+
+      // Navigation shortcuts (Alt+Left/Right)
+      if (e.altKey && e.key === 'ArrowLeft') {
+        e.preventDefault();
+        if (canGoBack) goBack();
+      }
+
+      if (e.altKey && e.key === 'ArrowRight') {
+        e.preventDefault();
+        if (canGoForward) goForward();
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -573,6 +699,31 @@ function App() {
     }
   }, [refreshTree]);
 
+  // Handle terminal output from Electron
+  useEffect(() => {
+    if (window && (window as any).electron && (window as any).electron.ipcRenderer) {
+      const handleTerminalOutput = (event: any, data: { command: string; output: string; success: boolean; terminalId?: string }) => {
+        console.log('Received terminal output:', data);
+        // Route output to the correct terminal tab
+        const targetTerminalId = data.terminalId || activeTerminalTab;
+        const activeTab = terminalTabs.find(tab => tab.id === targetTerminalId);
+
+        if (activeTab) {
+          const newOutput = [...activeTab.output, data.output];
+          updateTerminalOutput(targetTerminalId, newOutput);
+        } else {
+          console.error('No terminal tab found for id:', targetTerminalId);
+        }
+      };
+
+      (window as any).electron.ipcRenderer.on('terminal-output', handleTerminalOutput);
+
+      return () => {
+        (window as any).electron.ipcRenderer.removeListener('terminal-output', handleTerminalOutput);
+      };
+    }
+  }, [terminalTabs, activeTerminalTab, updateTerminalOutput]);
+
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
@@ -624,6 +775,29 @@ function App() {
     setQuickOpen(false);
     openTab(path);
   };
+
+  // Navigation functions for file navigation (like VSCode)
+  const goBack = useCallback(() => {
+    if (navigationIndex > 0) {
+      const newIndex = navigationIndex - 1;
+      const targetPath = navigationHistory[newIndex];
+      setNavigationIndex(newIndex);
+      loadEntry(targetPath);
+    }
+  }, [navigationIndex, navigationHistory, loadEntry]);
+
+  const goForward = useCallback(() => {
+    if (navigationIndex < navigationHistory.length - 1) {
+      const newIndex = navigationIndex + 1;
+      const targetPath = navigationHistory[newIndex];
+      setNavigationIndex(newIndex);
+      loadEntry(targetPath);
+    }
+  }, [navigationIndex, navigationHistory, loadEntry]);
+
+  // Determine if navigation buttons should be enabled
+  const canGoBack = navigationIndex > 0;
+  const canGoForward = navigationIndex < navigationHistory.length - 1;
 
   const runSearch = async (query: string) => {
     if (!query.trim()) {
@@ -755,16 +929,16 @@ function App() {
             (window as any).electron.ipcRenderer.send('close-window');
           }
         }}
-        onBack={() => {}}
-        onForward={() => {}}
+        onBack={goBack}
+        onForward={goForward}
         onSearch={(query) => {
           // Handle search query - open file if it's a file path
           if (query && query.trim()) {
             // Check if the query is a file path (contains a file extension or is in the tree)
-            const isFilePath = query.includes('.') || tree.some(node => 
+            const isFilePath = query.includes('.') || tree.some(node =>
               node.path === query || node.name === query
             );
-            
+
             if (isFilePath) {
               // Find the file in the tree and open it
               const findFileInTree = (nodes: FileNode[], target: string): FileNode | undefined => {
@@ -779,7 +953,7 @@ function App() {
               };
 
               let fileNode = findFileInTree(tree, query);
-              
+
               // If not found by full path, try by name
               if (!fileNode) {
                 const fileName = query.split('/').pop() || query;
@@ -799,8 +973,8 @@ function App() {
             }
           }
         }}
-        canGoBack={false}
-        canGoForward={false}
+        canGoBack={canGoBack}
+        canGoForward={canGoForward}
         tree={tree}
       />
       <div
@@ -899,6 +1073,11 @@ function App() {
           output={output}
           debugMessages={debugMessages}
           onTerminalCommand={handleTerminalCommand}
+          terminalTabs={terminalTabs}
+          activeTerminalTab={activeTerminalTab}
+          onTerminalTabSwitch={setActiveTerminalTab}
+          onNewTerminalTab={createNewTerminalTab}
+          onCloseTerminalTab={closeTerminalTab}
         />
       </div>
       {contextMenu && (
